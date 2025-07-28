@@ -1,0 +1,102 @@
+2025-07-28 21:43:04+0800: Running with following config:
+allowResignation = true
+lagBuffer = 1.0
+logAllGTPCommunication = true
+logDir = gtp_logs
+logSearchInfo = true
+logSearchInfoForChosenMove = false
+logToStderr = false
+maxTimePondering = 60.0
+maxVisits = 500
+numSearchThreads = 6
+ponderingEnabled = false
+resignConsecTurns = 3
+resignThreshold = -0.90
+rules = tromp-taylor
+searchFactorAfterOnePass = 0.50
+searchFactorAfterTwoPass = 0.25
+searchFactorWhenWinning = 0.40
+searchFactorWhenWinningThreshold = 0.95
+
+2025-07-28 21:43:04+0800: GTP Engine starting...
+2025-07-28 21:43:04+0800: KataGo v1.16.3
+2025-07-28 21:43:04+0800: Using TrompTaylor rules initially, unless GTP/GUI overrides this
+2025-07-28 21:43:04+0800: Using 6 CPU thread(s) for search
+2025-07-28 21:43:04+0800: nnRandSeed0 = 6094872727846512772
+2025-07-28 21:43:04+0800: After dedups: nnModelFile0 = /opt/homebrew/Cellar/katago/1.16.3/share/katago/kata1-b28c512nbt-s9584861952-d4960414494.bin.gz useFP16 auto useNHWC auto
+2025-07-28 21:43:04+0800: Initializing neural net buffer to be size 19 * 19 exactly
+2025-07-28 21:43:06+0800: Loaded neural net with nnXLen 19 nnYLen 19
+2025-07-28 21:43:06+0800: Initializing board with boardXSize 19 boardYSize 19
+2025-07-28 21:43:06+0800: Loaded config /opt/homebrew/Cellar/katago/1.16.3/share/katago/configs/gtp_example.cfg
+2025-07-28 21:43:06+0800: Loaded model /opt/homebrew/Cellar/katago/1.16.3/share/katago/kata1-b28c512nbt-s9584861952-d4960414494.bin.gz
+2025-07-28 21:43:06+0800: Model name: kata1-b28c512nbt-s9584861952-d4960414494
+2025-07-28 21:43:06+0800: GTP ready, beginning main protocol loop
+2025-07-28 21:43:07+0800: Controller: boardsize 19
+2025-07-28 21:43:07+0800: = 
+2025-07-28 21:43:17+0800: Controller: clear_board
+2025-07-28 21:43:17+0800: = 
+2025-07-28 21:43:17+0800: Controller: komi 6.5
+2025-07-28 21:43:17+0800: = 
+2025-07-28 21:44:29+0800: Controller: play B C4
+2025-07-28 21:44:29+0800: = 
+2025-07-28 21:44:51+0800: Controller: genmove W
+2025-07-28 21:45:19+0800: MoveNum: 1 HASH: 3B81783DDA20CC166A420B5919139E6D
+   A B C D E F G H J K L M N O P Q R S T
+19 . . . . . . . . . . . . . . . . . . .
+18 . . . . . . . . . . . . . . . . . . .
+17 . . . . . . . . . . . . . . . . . . .
+16 . . . . . . . . . . . . . . . . . . .
+15 . . . . . . . . . . . . . . . . . . .
+14 . . . . . . . . . . . . . . . . . . .
+13 . . . . . . . . . . . . . . . . . . .
+12 . . . . . . . . . . . . . . . . . . .
+11 . . . . . . . . . . . . . . . . . . .
+10 . . . . . . . . . . . . . . . . . . .
+ 9 . . . . . . . . . . . . . . . . . . .
+ 8 . . . . . . . . . . . . . . . . . . .
+ 7 . . . . . . . . . . . . . . . . . . .
+ 6 . . . . . . . . . . . . . . . . . . .
+ 5 . . . . . . . . . . . . . . . . . . .
+ 4 . . X1. . . . . . . . . . . . @ . . .
+ 3 . . . . . . . . . . . . . . . . . . .
+ 2 . . . . . . . . . . . . . . . . . . .
+ 1 . . . . . . . . . . . . . . . . . . .
+
+koPOSITIONALscoreAREAtaxNONEsui1komi6.5
+Time taken: 27.7404
+Root visits: 505
+New playouts: 505
+NN rows: 486
+NN batches: 163
+NN avg batch size: 2.9816
+PV: Q4 Q16 D16 R3 R4 Q3 O3 P3 P4 O2 E3 N3 O4 M2 D5 C5 D6 C7 R14 R10
+Tree:
+: T -16.45c W -16.08c S  -0.38c ( -0.6 L  -0.1) N     505  --  Q4 Q16 D16 R3 R4 Q3 O3
+---White(^)---
+Q4  : T -16.03c W -15.69c S  -0.35c ( -0.6 L  -0.1) LCB  -16.47c P 54.82% WF 1354.2 PSV    1350 N     431  --  Q4 Q16 D16 R3 R4 Q3 O3 P3
+Q16 : T -18.21c W -17.79c S  -0.45c ( -0.7 L  -0.1) LCB  -20.08c P 16.29% WF 103.6 PSV      80 N      33  --  Q16 R4 C16 F4 P4 P3 O3 Q3
+D16 : T -17.99c W -17.64c S  -0.42c ( -0.6 L  -0.1) LCB  -20.61c P  7.20% WF  63.3 PSV      38 N      20  --  D16 R4 R16 O4 E4
+D17 : T -20.22c W -19.65c S  -0.76c ( -1.0 L  -0.4) LCB  -63.11c P  2.71% WF  12.2 PSV       7 N       4  --  D17 Q4 Q16
+Q17 : T -20.59c W -19.77c S  -0.81c ( -1.0 L  -0.4) LCB  -48.34c P  2.59% WF  15.5 PSV       6 N       5  --  Q17 Q4 D16 R15
+R16 : T -20.60c W -19.75c S  -0.78c ( -1.0 L  -0.5) LCB  -94.43c P  2.63% WF   9.0 PSV       6 N       3  --  R16 Q4
+C16 : T -21.31c W -20.32c S  -0.76c ( -1.0 L  -0.4) LCB -170.29c P  2.54% WF   5.9 PSV       5 N       2  --  C16 Q16
+Q3  : T -21.84c W -20.59c S  -0.80c ( -1.0 L  -0.4) LCB -170.88c P  2.42% WF   5.9 PSV       5 N       2  --  Q3 Q16
+R4  : T -21.68c W -20.26c S  -0.74c ( -0.9 L  -0.3) LCB -170.67c P  1.70% WF   5.9 PSV       3 N       2  --  R4 Q16
+C17 : T -24.32c W -23.18c S  -1.15c ( -1.4 L  -0.6) LCB -374.32c P  0.85% WF   2.9 PSV       1 N       1  --  C17
+
+2025-07-28 21:45:19+0800: = Q4
+2025-07-28 21:46:34+0800: Controller: play B C4
+2025-07-28 21:46:34+0800: ? illegal move
+2025-07-28 21:46:45+0800: Controller: play B C4
+2025-07-28 21:46:45+0800: ? illegal move
+2025-07-28 21:47:08+0800: Controller: play B C4
+2025-07-28 21:47:08+0800: ? illegal move
+2025-07-28 21:47:19+0800: Controller: play B C3
+2025-07-28 21:47:19+0800: = 
+2025-07-28 21:47:55+0800: Controller: play B G6
+2025-07-28 21:47:55+0800: = 
+2025-07-28 21:48:09+0800: Controller: quit
+2025-07-28 21:48:09+0800: Quit requested by controller
+2025-07-28 21:48:09+0800: = 
+2025-07-28 21:48:09+0800: GPU -1 finishing, processed 486 rows 163 batches
+2025-07-28 21:48:09+0800: All cleaned up, quitting
