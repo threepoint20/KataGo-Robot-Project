@@ -1,0 +1,302 @@
+import subprocess
+import os
+import time
+import select
+
+class KataGoGTP:
+    """
+    用於與 KataGo 圍棋引擎進行 GTP 協定通訊的類別。
+    (增強版：包含智慧啟動、更穩健的回應解析、並修正 I/O 死鎖問題)
+    """
+
+    def __init__(self, katago_path=None, model_path=None, config_path=None):
+        """
+        初始化 KataGoGTP 客戶端。
+        會自動尋找路徑，並在找不到時引發錯誤。
+        """
+        self.katago_path = katago_path or os.getenv("KATAGO_PATH", self._find_katago_path())
+        self.model_path = model_path or os.getenv("KATAGO_MODEL_PATH", "/opt/homebrew/Cellar/katago/1.16.3/share/katago/kata1-b28c512nbt-s9584861952-d4960414494.bin.gz")
+        self.config_path = config_path or os.getenv("KATAGO_CONFIG_PATH", "/opt/homebrew/Cellar/katago/1.16.3/share/katago/configs/gtp_example.cfg")
+        self.process = None
+
+        for path, name in [(self.katago_path, "KataGo 可執行檔"), (self.model_path, "模型檔案"), (self.config_path, "配置文件")]:
+            if not os.path.exists(path):
+                print(f"錯誤：{name} 不存在於: {path}")
+                raise FileNotFoundError(f"{name} 找不到: {path}")
+
+    def _find_katago_path(self):
+        """動態查找 KataGo 可執行檔路徑"""
+        try:
+            result = subprocess.run(['which', 'katago'], capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return "/opt/homebrew/Cellar/katago/1.16.3/bin/katago"
+
+    def start_katago(self):
+        """
+        啟動 KataGo 進程，並使用固定延遲等待初始化。
+        [修改] 跳過 "GTP ready" 關鍵字檢查，改為固定延遲。
+        """
+        command = [
+            self.katago_path,
+            "gtp",
+            "-model", self.model_path,
+            "-config", self.config_path
+        ]
+        print(f"啟動 KataGo 命令: {' '.join(command)}")
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                encoding='utf-8'
+            )
+            
+            print("KataGo 啟動成功，固定延遲 5 秒等待初始化...")
+            time.sleep(5) # 使用固定的延遲時間來等待 KataGo 啟動
+
+            # 嘗試非阻塞地清空一次 stderr，以防萬一有啟動日誌塞滿緩衝區
+            try:
+                while True:
+                    rlist_err, _, _ = select.select([self.process.stderr], [], [], 0)
+                    if rlist_err:
+                        line = self.process.stderr.readline()
+                        if line:
+                             print(f"KataGo STDERR (啟動日誌): {line.strip()}")
+                    else:
+                        # 當 stderr 中沒有更多內容可讀時，跳出迴圈
+                        break
+            except Exception as e:
+                print(f"清空 stderr 緩衝區時發生非關鍵錯誤: {e}")
+                pass 
+
+            print("KataGo 預估已準備就緒，可以接收指令。")
+
+        except Exception as e:
+            print(f"啟動 KataGo 時發生錯誤: {e}")
+            self.process = None
+            raise
+
+    def send_command(self, command):
+        """
+        向 KataGo 發送 GTP 指令並讀取其回覆。
+        [修正] 採用更穩健的迴圈終止條件，以避免不必要的超時。
+        """
+        if not self.process or self.process.poll() is not None:
+            print("錯誤：KataGo 進程未啟動或已終止。")
+            return None
+
+        full_command = command.strip() + "\n"
+        print(f"-> 發送指令: {full_command.strip()}")
+        try:
+            self.process.stdin.write(full_command)
+            self.process.stdin.flush()
+        except (BrokenPipeError, ValueError):
+            print("錯誤：與 KataGo 進程的管道已斷開，KataGo 可能已崩潰。")
+            return None
+
+        response_lines = []
+        is_genmove_like = command.strip().lower().startswith("genmove")
+        timeout = 120 if is_genmove_like else 10
+        start_time = time.time()
+        
+        move_from_stderr = None
+        response_started = False
+
+        while True:
+            if time.time() - start_time > timeout:
+                current_response = "\n".join(response_lines)
+                print(f"錯誤：KataGo 回覆超時 ({timeout}秒)。目前收到回應內容:\n{current_response}")
+                break
+            
+            if self.process.poll() is not None:
+                print("錯誤：在等待回覆時，KataGo 進程意外終止。")
+                break
+
+            readable, _, _ = select.select([self.process.stdout, self.process.stderr], [], [], 0.1)
+
+            # 處理 stderr (日誌和備用落子捕捉)
+            if self.process.stderr in readable:
+                line = self.process.stderr.readline()
+                if line:
+                    stripped_line = line.strip()
+                    print(f"<- 收到 STDERR (日誌): {stripped_line}")
+                    if is_genmove_like:
+                        marker = "= "
+                        if marker in stripped_line:
+                            try:
+                                potential_move_part = stripped_line.split(marker, 1)[1]
+                                move = potential_move_part.strip().split()[0]
+                                if len(move) > 1 and 'A' <= move[0].upper() <= 'T' and move[1:].isdigit():
+                                    print(f"*** 從 STDERR 捕獲到落子: {move} ***")
+                                    move_from_stderr = move
+                            except (IndexError, ValueError):
+                                pass
+            
+            # 處理 stdout (主要回應和迴圈終止)
+            if self.process.stdout in readable:
+                line = self.process.stdout.readline()
+                if not line: # EOF
+                    print("KataGo 的 stdout 流已關閉 (EOF)。")
+                    break # 退出迴圈
+
+                stripped_line = line.strip()
+                response_lines.append(stripped_line)
+                print(f"<- 收到 STDOUT: {stripped_line}")
+
+                if stripped_line.startswith('=') or stripped_line.startswith('?'):
+                    response_started = True
+
+                # [核心修正] 當已開始回應且收到空行時，視為回應結束
+                if response_started and stripped_line == "":
+                    print("偵測到回應結束標記 (回應已開始且收到空白行)，正常結束讀取。")
+                    break # 正常退出迴圈
+
+        # 在迴圈結束後，決定最終的回應內容
+        # 檢查 stdout 的回應是否為空 (例如只有 '=')
+        stdout_has_content = any(r.strip().startswith('= ') and len(r.strip()) > 2 for r in response_lines)
+        
+        # 如果是 genmove 指令，且 stdout 沒有內容，但 stderr 有，則使用 stderr 的結果
+        if is_genmove_like and not stdout_has_content and move_from_stderr:
+            print(f"*** 使用從 STDERR 捕獲的落子 '{move_from_stderr}' 構建最終回應 ***")
+            return f"= {move_from_stderr}\n\n"
+        
+        return "\n".join(response_lines)
+
+
+    def parse_response(self, response):
+        """
+        解析 KataGo 的 GTP 回覆 (增強版)。
+        此版本能正確處理內容與 '=' 或 '?' 在同一行的情況。
+        返回一個字典，包含 'status' ('success', 'error', 'info') 和 'content'。
+        """
+        if response is None:
+            return {"status": "error", "content": "KataGo 沒有回覆 (None)。"}
+        
+        response = response.strip()
+        if not response:
+            return {"status": "error", "content": "KataGo 回覆為空。"}
+
+        lines = response.split('\n')
+        
+        response_start_index = -1
+        status_char = ''
+        for i, line in enumerate(lines):
+            clean_line = line.strip()
+            if clean_line.startswith('='):
+                response_start_index = i
+                status_char = '='
+                break
+            elif clean_line.startswith('?'):
+                response_start_index = i
+                status_char = '?'
+                break
+        
+        if response_start_index == -1:
+            return {"status": "info", "content": response}
+
+        start_line = lines[response_start_index].strip()
+        
+        if status_char == '=':
+            status = 'success'
+            content_parts = [start_line[1:].lstrip()]
+        else:
+            status = 'error'
+            content_parts = [start_line[1:].lstrip()]
+
+        for i in range(response_start_index + 1, len(lines)):
+            content_parts.append(lines[i])
+            
+        full_content = "\n".join(filter(None, content_parts)).strip()
+        
+        return {"status": status, "content": full_content}
+
+
+    def stop_katago(self):
+        """
+        優雅地停止 KataGo 進程。
+        先嘗試 'quit' 指令，若失敗則強制終止。
+        """
+        if self.process and self.process.poll() is None:
+            print("正在停止 KataGo 進程...")
+            try:
+                self.process.stdin.write("quit\n")
+                self.process.stdin.flush()
+                self.process.wait(timeout=5)
+                print("KataGo 已透過 quit 指令正常退出。")
+            except (BrokenPipeError, ValueError):
+                print("管道已斷開，KataGo 可能已提前崩潰。")
+            except subprocess.TimeoutExpired:
+                print("KataGo 未在5秒內回應 quit 指令，將強制終止...")
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=2)
+                    print("KataGo 已被終止 (terminate)。")
+                except subprocess.TimeoutExpired:
+                    print("終止失敗，將強制殺死進程 (kill)...")
+                    self.process.kill()
+                    self.process.wait()
+                    print("KataGo 已被強制殺死 (kill)。")
+            finally:
+                print(f"KataGo 進程已停止，退出碼: {self.process.returncode}")
+        elif self.process:
+            print(f"KataGo 進程先前已終止，退出碼: {self.process.returncode}")
+
+
+# --- 範例使用程式碼 ---
+if __name__ == "__main__":
+    katago_client = None
+    try:
+        katago_client = KataGoGTP()
+        katago_client.start_katago()
+
+        response_boardsize = katago_client.send_command("boardsize 19")
+        print(katago_client.parse_response(response_boardsize))
+        
+        response_clear = katago_client.send_command("clear_board")
+        print(katago_client.parse_response(response_clear))
+        
+        response_komi = katago_client.send_command("komi 6.5")
+        print(katago_client.parse_response(response_komi))
+
+        print("\nKataGo 介面已準備就緒，您可以輸入 GTP 指令了。")
+        print("例如：")
+        print("  play B D4   (讓黑棋下在 D4)")
+        print("  genmove W   (讓 KataGo 幫白棋生成一步棋)")
+        print("  showboard   (顯示當前棋盤狀態)")
+        print("  list_commands (列出所有支援的指令)")
+        print("  quit        (退出此程式)")
+        
+        while True:
+            user_input = input("\n請輸入 GTP 指令 (或 'quit' 退出): ").strip()
+
+            if not user_input:
+                continue
+
+            if user_input.lower() == "quit":
+                print("收到 'quit' 指令，正在結束程式...")
+                break
+
+            raw_response = katago_client.send_command(user_input)
+            
+            parsed = katago_client.parse_response(raw_response)
+            
+            if parsed['status'] == 'success':
+                print(f"✅ KataGo 成功回應:\n{parsed['content']}")
+            elif parsed['status'] == 'error':
+                print(f"❌ KataGo 錯誤: {parsed['content']}")
+            else:
+                print(f"ℹ️ KataGo 訊息:\n{parsed['content']}")
+
+    except (FileNotFoundError, RuntimeError) as e:
+        print(f"\n程序初始化失敗: {e}")
+    except Exception as e:
+        print(f"\n程序執行中發生未預期的錯誤: {e}")
+    finally:
+        if katago_client is not None:
+            katago_client.stop_katago()
