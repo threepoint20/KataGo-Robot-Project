@@ -1,0 +1,45 @@
+[2025-07-30 21:49:42.5569 通過 'which katago' 找到 KataGo 路徑: /opt/homebrew/bin/katago
+[2025-07-30 21:49:42.5573 KataGoGTP 實例化。
+[2025-07-30 21:49:42.5573 所有 KataGo 相關檔案路徑檢查通過。
+[2025-07-30 21:49:42.5574 啟動 KataGo 命令: /opt/homebrew/bin/katago gtp -model /opt/homebrew/Cellar/katago/1.16.3/share/katago/kata1-b28c512nbt-s9584861952-d4960414494.bin.gz -config /opt/homebrew/Cellar/katago/1.16.3/share/katago/configs/gtp_example.cfg
+[2025-07-30 21:49:42.5583 KataGo 進程啟動成功。
+[2025-07-30 21:49:42.5586 I/O 讀取線程已啟動。
+[2025-07-30 21:49:42.5586 [IO Thread] I/O 讀取線程啟動。
+[2025-07-30 21:49:42.5589 等待 KataGo 初始化完成 (靜默判斷)...
+[2025-07-30 21:49:42.5971 [IO Thread] <- STDERR: 'KataGo v1.16.3'
+[2025-07-30 21:49:42.6641 [啟動時 STDERR]: KataGo v1.16.3
+[2025-07-30 21:49:44.7897 [IO Thread] <- STDERR: 'Using TrompTaylor rules initially, unless GTP/GUI overrides this'
+[2025-07-30 21:49:44.7899 [IO Thread] <- STDERR: 'Metal backend 0: Apple M1, Model version 15 kata1-b28c512nbt-s9584861952-d4960414494, 19x19'
+[2025-07-30 21:49:44.7910 [IO Thread] <- STDERR: 'Initializing board with boardXSize 19 boardYSize 19'
+[2025-07-30 21:49:44.7911 [IO Thread] <- STDERR: 'Loaded config /opt/homebrew/Cellar/katago/1.16.3/share/katago/configs/gtp_example.cfg'
+[2025-07-30 21:49:44.8659 [啟動時 STDERR]: Using TrompTaylor rules initially, unless GTP/GUI overrides this
+[2025-07-30 21:49:44.8662 [啟動時 STDERR]: Metal backend 0: Apple M1, Model version 15 kata1-b28c512nbt-s9584861952-d4960414494, 19x19
+[2025-07-30 21:49:44.8663 [啟動時 STDERR]: Initializing board with boardXSize 19 boardYSize 19
+[2025-07-30 21:49:44.8663 [啟動時 STDERR]: Loaded config /opt/homebrew/Cellar/katago/1.16.3/share/katago/configs/gtp_example.cfg
+[2025-07-30 21:49:49.9538 檢測到 KataGo 已靜默 5.09 秒。認為已啟動完成。
+[2025-07-30 21:49:49.9550 
+✅ KataGo 介面準備就緒，可開始輸入 GTP 指令。
+[2025-07-30 21:49:49.9553 例如：play B D4 | genmove W | showboard | list_commands | quit
+[2025-07-30 21:50:02.4500 -> 發送指令: 'play B H3'
+[2025-07-30 21:50:02.4508 指令 'play B H3' 已成功發送到 KataGo stdin。
+[2025-07-30 21:50:02.4512 已清空 stdout/stderr 佇列，準備接收新回應。
+[2025-07-30 21:50:02.4514 [IO Thread] <- STDOUT: '='
+[2025-07-30 21:50:02.4516 開始等待指令 'play B H3' 的回應，超時設定為 10 秒。
+[2025-07-30 21:50:02.4519 在 STDOUT 中找到 GTP 回應的主要部分: '='，停止等待。
+[2025-07-30 21:50:02.4521 開始解析回應:
+'='
+[2025-07-30 21:50:02.4523 解析結果: 成功，內容: ''
+[2025-07-30 21:50:02.4525 ✅ 回應：
+
+[2025-07-30 21:50:17.5814 -> 發送指令: 'genmove W'
+[2025-07-30 21:50:17.5820 指令 'genmove W' 已成功發送到 KataGo stdin。
+[2025-07-30 21:50:17.5824 已清空 stdout/stderr 佇列，準備接收新回應。
+[2025-07-30 21:50:17.5827 開始等待指令 'genmove W' 的回應，超時設定為 120 秒。
+[2025-07-30 21:50:33.8709 [IO Thread] <- STDOUT: ''
+[2025-07-30 21:50:33.8715 [IO Thread] <- STDOUT: '= C4'
+[2025-07-30 21:50:33.8837 在 STDOUT 中找到 GTP 回應的主要部分: '= C4'，停止等待。
+[2025-07-30 21:50:33.8841 開始解析回應:
+'= C4'
+[2025-07-30 21:50:33.8842 解析結果: 成功，內容: 'C4'
+[2025-07-30 21:50:33.8843 ✅ 回應：
+C4
