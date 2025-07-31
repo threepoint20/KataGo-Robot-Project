@@ -5,7 +5,6 @@ import select
 import datetime
 import threading
 import queue
-import numpy as np # 新增導入 numpy
 
 # --- 設定日誌檔路徑 ---
 LOG_FILE_PATH = "katago_debug_log.txt"
@@ -17,76 +16,6 @@ def write_log(message):
     with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
         f.write(f"{log_message}\n")
     print(log_message) # 同時列印到控制台，方便實時觀察
-
-# --- 圍棋盤和機械臂的物理參數 (請根據您的實際測量值來設定) ---
-# 這些值是機械臂校準後確定的，請您精確測量！
-# 圍棋盤每個格點中心的物理間距 (單位: 毫米)
-CELL_SIZE_MM = 20.0 # 範例值，請替換為您實際測量的棋盤格點間距
-
-# 棋盤上 'A1' 交叉點的機械臂物理座標 (單位: 毫米)
-# 假設棋盤的 A1 點是機械臂的參考原點，X軸向右，Y軸向上。
-# 請用您實際測量的值來替換這些範例值
-ROBOT_BOARD_ORIGIN_X_MM = 150.0 # 'A1' 點的機械臂 X 座標
-ROBOT_BOARD_ORIGIN_Y_MM = 100.0 # 'A1' 點的機械臂 Y 座標
-
-# GTP 列字母到索引的映射 (跳過 'I')
-GTP_COL_MAP = {
-    'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7,
-    'J': 8, 'K': 9, 'L': 10, 'M': 11, 'N': 12, 'O': 13, 'P': 14,
-    'Q': 15, 'R': 16, 'S': 17, 'T': 18
-}
-
-def gtp_to_robot_coords(gtp_move):
-    """
-    將 GTP 座標 (例如 "D4", "Q16") 轉換為機械臂的物理 (X, Y) 座標。
-    假設棋盤 A1 點是機械臂的參考原點，X軸向右，Y軸向上。
-
-    Args:
-        gtp_move (str): GTP 格式的落子座標，例如 "D4" 或 "Q16"。
-
-    Returns:
-        tuple: (robot_x_mm, robot_y_mm) 該位置在機械臂工作空間中的物理座標。
-               如果輸入無效，返回 None。
-    """
-    gtp_move = gtp_move.strip().upper()
-
-    if len(gtp_move) < 2 or len(gtp_move) > 3:
-        write_log(f"錯誤: 無效的 GTP 座標格式: {gtp_move} (長度不符)")
-        return None
-
-    col_char = gtp_move[0]
-    row_num_str = gtp_move[1:]
-
-    if col_char not in GTP_COL_MAP:
-        write_log(f"錯誤: 無效的 GTP 列字母: {col_char} (不在 A-T 範圍或為 I)")
-        return None
-
-    try:
-        row_num = int(row_num_str)
-        if not (1 <= row_num <= 19):
-            write_log(f"錯誤: 無效的 GTP 行號: {row_num_str} (必須在 1-19 之間)")
-            return None
-    except ValueError:
-        write_log(f"錯誤: GTP 行號格式錯誤: {row_num_str} (非數字)")
-        return None
-
-    # 將 GTP 字母轉換為 0-18 的列索引
-    col_index = GTP_COL_MAP[col_char]
-    
-    # 將 GTP 行號轉換為 0-18 的行索引 (GTP 1 對應索引 0，GTP 19 對應索引 18)
-    row_index = row_num - 1 
-
-    # 計算機械臂的 X 座標
-    # 從 A1 原點開始，向右移動 col_index * CELL_SIZE_MM
-    robot_x_mm = ROBOT_BOARD_ORIGIN_X_MM + (col_index * CELL_SIZE_MM)
-
-    # 計算機械臂的 Y 座標
-    # 從 A1 原點開始，向上移動 row_index * CELL_SIZE_MM
-    robot_y_mm = ROBOT_BOARD_ORIGIN_Y_MM + (row_index * CELL_SIZE_MM)
-
-    write_log(f"GTP 座標 {gtp_move} (列索引: {col_index}, 行索引: {row_index}) 轉換為機械臂座標: (X={robot_x_mm:.2f}mm, Y={robot_y_mm:.2f}mm)")
-    return (robot_x_mm, robot_y_mm)
-
 
 class KataGoGTP:
     def __init__(self, katago_path=None, model_path=None, config_path=None):
@@ -422,9 +351,6 @@ class KataGoGTP:
 if __name__ == "__main__":
     
     katago_client = None
-    # 新增：追蹤當前輪到哪方下子，B = 黑棋，W = 白棋
-    current_player = "B" 
-
     try:
         katago_client = KataGoGTP(
             # 如果需要，在這裡設定您的 KataGo 路徑，例如:
@@ -441,9 +367,7 @@ if __name__ == "__main__":
         write_log("例如：play B D4 | genmove W | showboard | list_commands | quit")
 
         while True:
-            # 提示當前輪到哪方下子
-            user_input = input(f"\n輪到 {current_player} 棋下子。請輸入 GTP 指令 (或 quit 結束): ").strip()
-            
+            user_input = input("\n請輸入 GTP 指令 (或 quit 結束): ").strip()
             if not user_input:
                 continue
             if user_input.lower() == "quit":
@@ -455,98 +379,7 @@ if __name__ == "__main__":
                 else:
                     write_log("📋 無法獲取棋盤狀態或超時。")
                 continue
-            
-            # --- 處理 play 指令 ---
-            if user_input.lower().startswith("play "):
-                parts = user_input.split(' ')
-                if len(parts) >= 3:
-                    player_color = parts[1].upper() # 提取落子顏色 (B 或 W)
-                    move_coord = parts[2].upper() # 提取落子座標
 
-                    if player_color not in ["B", "W"]:
-                        write_log(f"❌ 無效的玩家顏色: {player_color}。請輸入 'B' 或 'W'。")
-                        continue
-                    
-                    if player_color != current_player:
-                        write_log(f"⚠️ 警告: 現在輪到 {current_player} 下子，但您輸入的是 {player_color} 的落子。仍會執行。")
-                    
-                    raw_response = katago_client.send_command(user_input)
-                    parsed_response = katago_client.parse_response(raw_response)
-
-                    if parsed_response['status'] == 'success':
-                        write_log(f"✅ 回應：\n{parsed_response['content']}")
-                        # 如果是當前回合的有效落子，則切換回合
-                        if player_color == current_player:
-                            current_player = "W" if current_player == "B" else "B"
-                            write_log(f"✅ 回合切換：下一個輪到 {current_player} 下子。")
-                    elif parsed_response['status'] == 'error':
-                        write_log(f"❌ 錯誤：{parsed_response['content']}")
-                    else:
-                        write_log(f"ℹ️ 訊息：{parsed_response['content']}")
-                else:
-                    write_log(f"❌ 無效的 'play' 指令格式。範例：play B D4")
-                continue # 處理完 play 指令後，跳到下一個循環
-
-            # --- 處理 genmove 指令 ---
-            if user_input.lower().startswith("genmove"):
-                parts = user_input.split(' ')
-                if len(parts) >= 2:
-                    genmove_color = parts[1].upper() # 提取 genmove 的顏色
-
-                    if genmove_color not in ["B", "W"]:
-                        write_log(f"❌ 無效的 genmove 顏色: {genmove_color}。請輸入 'B' 或 'W'。")
-                        continue
-
-                    if genmove_color != current_player:
-                        write_log(f"⚠️ 警告: 現在輪到 {current_player} 下子，但您請求 {genmove_color} 進行 genmove。仍會執行。")
-                    
-                    raw_response = katago_client.send_command(user_input)
-                    parsed_response = katago_client.parse_response(raw_response)
-
-                    if parsed_response['status'] == 'success':
-                        katago_move = parsed_response['content'].strip()
-                        write_log(f"✅ KataGo 建議落子：{katago_move}")
-
-                        if katago_move.lower() == "pass":
-                            write_log("KataGo 選擇 'pass'，不執行機械臂動作。")
-                            # 即使 pass 也應切換回合
-                            current_player = "W" if current_player == "B" else "B"
-                            write_log(f"✅ 回合切換：下一個輪到 {current_player} 下子。")
-                        else:
-                            # 將 KataGo 的落子位置轉換為機械臂座標
-                            robot_target_xy = gtp_to_robot_coords(katago_move)
-
-                            if robot_target_xy:
-                                robot_x, robot_y = robot_target_xy
-                                write_log(f"機械臂將移動到: X={robot_x:.2f}mm, Y={robot_y:.2f}mm")
-                                
-                                # --- 在這裡呼叫您的機械臂控制程式碼 ---
-                                # 例如：
-                                # robot_controller.pick_stone(genmove_color) # 吸取 KataGo 建議顏色的棋子
-                                # robot_controller.place_stone(robot_x, robot_y, Z_PLACEMENT) 
-                                # robot_controller.retract()
-
-                                # 重要：通知 KataGo 機械臂已落子 (更新 KataGo 的內部棋局狀態)
-                                # 這一步很關鍵，確保 KataGo 的內部狀態與物理棋盤同步
-                                play_command_for_katago = f"play {genmove_color} {katago_move}" 
-                                katago_client.send_command(play_command_for_katago)
-                                write_log(f"已通知 KataGo 執行落子: {play_command_for_katago}")
-                                
-                                # 成功落子後，切換回合
-                                current_player = "W" if current_player == "B" else "B"
-                                write_log(f"✅ 回合切換：下一個輪到 {current_player} 下子。")
-                            else:
-                                write_log("無法轉換落子座標，不執行機械臂動作。")
-                    elif parsed_response['status'] == 'error':
-                        write_log(f"❌ 錯誤：{parsed_response['content']}")
-                    else:
-                        write_log(f"ℹ️ 訊息：{parsed_response['content']}")
-                else:
-                    write_log(f"❌ 無效的 'genmove' 指令格式。範例：genmove W")
-                continue # 處理完 genmove 指令後，跳到下一個循環
-            
-            # --- 其他 GTP 指令的通用處理 (例如 protocol_version, boardsize, clear_board 等) ---
-            # 這些指令通常不會改變遊戲回合，所以不切換 current_player
             raw = katago_client.send_command(user_input)
             parsed = katago_client.parse_response(raw)
 
