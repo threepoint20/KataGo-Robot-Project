@@ -1,0 +1,244 @@
+# src/vision_system.py
+import cv2
+import time
+import numpy as np 
+import json 
+import os   
+from _shared_utils import write_log
+
+PARAM_FILE_NAME = 'vision_parameters.json' 
+EMPTY_BOARD_TEMPLATE_FILE = 'empty_board_template.npy'
+
+class VisionSystem:
+    def __init__(self):
+        write_log("VisionSystem 初始化。")
+        self.cap = None 
+        self.camera_index = 0 
+
+        self.TRANSFORMED_BOARD_SIZE = 600
+        self.BOARD_DIM = 19
+        
+        self.manual_mode = "manual_grid"
+        self.manual_points = []
+        self.grid_map = None
+        self.manual_point_colors = [(0, 255, 255), (0, 255, 0)]
+        self.control_window_name = 'Vision Parameters'
+        
+        self._hardcoded_default_black_stone_diff = -30
+        self._hardcoded_default_white_stone_diff = 30
+        self.stone_detection_roi_radius = 10
+        
+        self.black_stone_diff = 0
+        self.white_stone_diff = 0
+
+        self._hardcoded_default_stability_frames = 5
+        self.stability_frames = 0
+        self.history_buffer = {}
+
+        self.empty_board_template = None 
+
+        self._load_parameters()
+        self.black_stone_diff = self._default_black_stone_diff
+        self.white_stone_diff = self._default_white_stone_diff
+        self.stability_frames = self._default_stability_frames
+        
+        self._create_parameter_trackbars()
+
+    # 其他方法略（_load_parameters, _set_hardcoded_defaults 等）
+
+    def _detect_stones(self, frame):
+        board_state = {}
+        if self.empty_board_template is None:
+            write_log("錯誤: 未載入空棋盤模板，無法進行棋子偵測。")
+            return {}
+
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray_template = cv2.cvtColor(self.empty_board_template, cv2.COLOR_BGR2GRAY)
+
+        for row in range(self.BOARD_DIM):
+            for col in range(self.BOARD_DIM):
+                x, y = tuple(self.grid_map[row, col])
+
+                roi_x_min = max(0, x - self.stone_detection_roi_radius)
+                roi_x_max = min(gray_frame.shape[1], x + self.stone_detection_roi_radius)
+                roi_y_min = max(0, y - self.stone_detection_roi_radius)
+                roi_y_max = min(gray_frame.shape[0], y + self.stone_detection_roi_radius)
+
+                roi_frame = gray_frame[roi_y_min:roi_y_max, roi_x_min:roi_x_max]
+                roi_template = gray_template[roi_y_min:roi_y_max, roi_x_min:roi_x_max]
+
+                if roi_frame.size == 0 or roi_template.size == 0:
+                    continue
+
+                difference = np.mean(roi_frame) - np.mean(roi_template)
+                detected_color = None
+
+                if difference < self.black_stone_diff:
+                    detected_color = "B"
+                elif difference > self.white_stone_diff:
+                    detected_color = "W"
+                else:
+                    detected_color = None
+
+                key = (row, col)
+                if key not in self.history_buffer:
+                    self.history_buffer[key] = []
+
+                self.history_buffer[key].append(detected_color)
+                if len(self.history_buffer[key]) > self.stability_frames:
+                    self.history_buffer[key].pop(0)
+
+                # 判定是否穩定
+                recent_history = self.history_buffer[key]
+                if len(recent_history) == self.stability_frames:
+                    if all(v == detected_color and v is not None for v in recent_history):
+                        col_char = "ABCDEFGHJKLMNOPQRST"[col]
+                        row_num = row + 1
+                        board_state[f"{col_char}{row_num}"] = detected_color
+        return board_state
+        def _create_grid_map(self, points):
+        if len(points) != self.BOARD_DIM * 2:
+            write_log("錯誤: 創建網格地圖所需的點數不為 38。")
+            return None
+
+        x_points = np.array(points[0:self.BOARD_DIM])
+        y_points = np.array(points[self.BOARD_DIM:])
+        
+        if len(x_points) != self.BOARD_DIM or len(y_points) != self.BOARD_DIM:
+            write_log("錯誤: 創建網格地圖時，X或Y軸點數不足19。")
+            return None
+        
+        grid = np.zeros((self.BOARD_DIM, self.BOARD_DIM, 2), dtype=np.int32)
+        x_coords = np.interp(np.arange(self.BOARD_DIM), np.arange(self.BOARD_DIM), x_points[:, 0])
+        y_coords = np.interp(np.arange(self.BOARD_DIM), np.arange(self.BOARD_DIM), y_points[:, 1])
+
+        for row in range(self.BOARD_DIM):
+            for col in range(self.BOARD_DIM):
+                grid[row, col] = (int(x_coords[col]), int(y_coords[row]))
+        
+        write_log("已成功創建 19x19 網格地圖。")
+        return grid
+
+    def start_camera(self):
+        self.cap = cv2.VideoCapture(self.camera_index)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        
+        if not self.cap.isOpened():
+            write_log(f"錯誤：視覺系統無法打開攝影機索引 {self.camera_index}。")
+            return False
+
+        write_log(f"視覺系統成功連接到攝影機索引 {self.camera_index}。")
+        cv2.namedWindow('Vision System - Live Feed')
+        cv2.setMouseCallback('Vision System - Live Feed', self._mouse_callback)
+        return True
+
+    def get_board_state(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            write_log("視覺系統：無法從攝影機讀取影像。")
+            return None
+        
+        processed_display_frame = frame.copy()
+        board_state = {}
+
+        if self.grid_map is not None:
+            self._draw_grid_map(processed_display_frame)
+
+            if self.empty_board_template is not None:
+                write_log("網格地圖和模板已載入，正在進行棋子偵測...")
+                board_state = self._detect_stones(frame)
+                self._draw_stone_detections(processed_display_frame, board_state)
+            else:
+                write_log("請先在空棋盤上按下 '--- Save Empty Board ---' 按鈕來創建模板。")
+        else:
+            if len(self.manual_points) == self.BOARD_DIM * 2:
+                write_log("所有校準點已點選。請按 '--- Save Grid Map ---' 按鈕保存網格地圖。")
+                self._draw_manual_points(processed_display_frame)
+            else:
+                write_log(f"請依序點擊 {len(self.manual_points)}/{self.BOARD_DIM*2} 個網格點以進行校準。")
+                self._draw_manual_points(processed_display_frame)
+
+        cv2.imshow('Vision System - Live Feed', processed_display_frame)
+        return board_state
+
+    def _draw_stone_detections(self, frame_to_draw, board_state):
+        for gtp_coord, stone_color in board_state.items():
+            row_char = gtp_coord[0]
+            row_num_str = gtp_coord[1:]
+
+            if row_char not in "ABCDEFGHJKLMNOPQRST":
+                continue
+            if not row_num_str.isdigit():
+                continue
+
+            row = int(row_num_str) - 1
+            col = "ABCDEFGHJKLMNOPQRST".index(row_char)
+            p = tuple(self.grid_map[row, col])
+
+            color_to_draw = (0, 0, 0) if stone_color == "B" else (255, 255, 255)
+            cv2.circle(frame_to_draw, p, self.stone_detection_roi_radius, (0, 255, 255), 2)
+            cv2.circle(frame_to_draw, p, self.stone_detection_roi_radius - 2, color_to_draw, -1)
+            cv2.putText(frame_to_draw, stone_color, (p[0] - 5, p[1] + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
+
+    def detect_human_move(self, prev_board_state, current_board_state):
+        pass
+
+    def stop_camera(self):
+        if self.cap and self.cap.isOpened():
+            self.cap.release()
+        cv2.destroyAllWindows()
+        write_log("視覺系統攝影機已停止。")
+
+    def _draw_manual_points(self, frame_to_draw):
+        for i, p in enumerate(self.manual_points):
+            color = self.manual_point_colors[i % 2]
+            cv2.circle(frame_to_draw, p, 10, color, -1)
+            if i < self.BOARD_DIM:
+                text = f"X:{i+1}"
+            else:
+                text = f"Y:{i-self.BOARD_DIM+1}"
+            cv2.putText(frame_to_draw, text, (p[0] + 15, p[1] + 15),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2, cv2.LINE_AA)
+
+    def _draw_grid_map(self, frame_to_draw):
+        if self.grid_map is not None:
+            for row in range(self.BOARD_DIM):
+                for col in range(self.BOARD_DIM):
+                    p = tuple(self.grid_map[row, col])
+                    cv2.circle(frame_to_draw, p, 5, (0, 255, 0), -1)
+                    if row < self.BOARD_DIM - 1:
+                        p2 = tuple(self.grid_map[row + 1, col])
+                        cv2.line(frame_to_draw, p, p2, (0, 255, 0), 1)
+                    if col < self.BOARD_DIM - 1:
+                        p2 = tuple(self.grid_map[row, col + 1])
+                        cv2.line(frame_to_draw, p, p2, (0, 255, 0), 1)
+                        if __name__ == "__main__":
+    vision_system = None
+    try:
+        vision_system = VisionSystem()
+        if not vision_system.start_camera():
+            write_log("視覺系統啟動失敗，無法進行單獨測試。")
+            exit(1)
+        write_log("\n✅ VisionSystem 單獨測試模式已啟動。")
+
+        if vision_system.grid_map is None:
+            write_log("---")
+            write_log("未找到已保存的網格地圖。請點擊 'Live Feed' 視窗開始手動校準。")
+            write_log("點擊順序：從左下角開始，沿著最底層水平線點擊19個點，然後再沿著最左側垂直線點擊19個點。")
+            write_log("---")
+
+        while True:
+            board_state = vision_system.get_board_state()
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                write_log("用戶手動退出 VisionSystem 單獨測試。")
+                break
+
+    except Exception as e:
+        write_log(f"\n🚨 VisionSystem 單獨測試發生錯誤：{e}")
+    finally:
+        if vision_system:
+            vision_system.stop_camera()
+        write_log("VisionSystem 單獨測試程式結束。")

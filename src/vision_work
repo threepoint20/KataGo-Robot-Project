@@ -1,16 +1,12 @@
-# src/vision_system.py
 import cv2
 import time
 import numpy as np 
 import json 
 import os   
 from _shared_utils import write_log
-# 注意: 在手動模式下，此檔案不再需要 KMeans 庫
-# from sklearn.cluster import KMeans 
 
 # --- 定義參數儲存檔案的路徑 ---
 PARAM_FILE_NAME = 'vision_parameters.json' 
-EMPTY_BOARD_TEMPLATE_FILE = 'empty_board_template.npy' # 新增：空棋盤模板檔案
 
 class VisionSystem:
     def __init__(self):
@@ -21,37 +17,50 @@ class VisionSystem:
         self.TRANSFORMED_BOARD_SIZE = 600
         self.BOARD_DIM = 19
         
+        # --- 手動選點模式相關屬性 ---
         self.manual_mode = "manual_grid"
         self.manual_points = []
         self.grid_map = None
         self.manual_point_colors = [(0, 255, 255), (0, 255, 0)]
         self.control_window_name = 'Vision Parameters'
-        
-        # --- 棋子偵測參數 (基於差異的閾值) ---
-        self._hardcoded_default_black_stone_diff = -30
-        self._hardcoded_default_white_stone_diff = 30
+
+        # --- 硬編碼的原始預設值 ---
+        self._hardcoded_default_canny_threshold1 = 100 
+        self._hardcoded_default_canny_threshold2 = 200 
+        self.canny_max_threshold = 500
+        self._hardcoded_default_hough_threshold = 15     
+        self._hardcoded_default_hough_min_line_length = 50 
+        self._hardcoded_default_hough_max_line_gap = 20    
+        self.hough_max_threshold = 200
+        self.hough_max_line_length = 300
+        self.hough_max_line_gap = 100
+        self._hardcoded_default_ransac_iterations = 500 
+        self._hardcoded_default_ransac_line_tolerance = 5 
+        self._hardcoded_default_ransac_min_inliers_ratio = 0.7 
+        self.ransac_max_iterations = 2000 
+        self.ransac_max_line_tolerance = 20 
+        self._hardcoded_default_black_stone_thresh = 50
+        self._hardcoded_default_white_stone_thresh = 180
         self.stone_detection_roi_radius = 10
         
-        self.black_stone_diff = 0
-        self.white_stone_diff = 0
-
-        # --- 穩定性偵測參數 (新增) ---
-        self._hardcoded_default_stability_frames = 5 # 偵測結果需要連續穩定5幀才確認
-        self.stability_frames = 0
-        self.history_buffer = {} # 儲存每個格點的偵測歷史
-        
-        self.empty_board_template = None 
-
+        # --- 載入參數並設定初始值 ---
         self._load_parameters()
-        self.black_stone_diff = self._default_black_stone_diff
-        self.white_stone_diff = self._default_white_stone_diff
-        self.stability_frames = self._default_stability_frames
+        self.black_stone_thresh = self._default_black_stone_thresh
+        self.white_stone_thresh = self._default_white_stone_thresh
+        self.canny_threshold1 = self._default_canny_threshold1
+        self.canny_threshold2 = self._default_canny_threshold2
+        self.hough_threshold = self._default_hough_threshold
+        self.hough_min_line_length = self._default_hough_min_line_length
+        self.hough_max_line_gap = self._default_hough_max_line_gap
+        self.ransac_iterations = self._default_ransac_iterations
+        self.ransac_line_tolerance = self._default_ransac_line_tolerance
+        self.ransac_min_inliers_ratio = self._default_ransac_min_inliers_ratio
         
+        # 創建 UI 介面視窗和滑桿
         self._create_parameter_trackbars()
 
-
     def _load_parameters(self):
-        """嘗試從檔案載入參數和網格地圖，如果失敗則從頭開始。"""
+        """嘗試從檔案載入參數，如果失敗則使用硬編碼預設值。"""
         self._loaded_params = {} 
         try:
             if not os.path.exists(PARAM_FILE_NAME):
@@ -61,9 +70,17 @@ class VisionSystem:
                 params = json.load(f)
                 self._loaded_params = params 
                 
-                self._default_black_stone_diff = params.get('black_stone_diff', self._hardcoded_default_black_stone_diff)
-                self._default_white_stone_diff = params.get('white_stone_diff', self._hardcoded_default_white_stone_diff)
-                self._default_stability_frames = params.get('stability_frames', self._hardcoded_default_stability_frames)
+                self._default_canny_threshold1 = params.get('canny_threshold1', 100)
+                self._default_canny_threshold2 = params.get('canny_threshold2', 200)
+                self._default_hough_threshold = params.get('hough_threshold', 15)
+                self._default_hough_min_line_length = params.get('hough_min_line_length', 50)
+                self._default_hough_max_line_gap = params.get('hough_max_line_gap', 20)
+                self._default_ransac_iterations = params.get('ransac_iterations', 500)
+                self._default_ransac_line_tolerance = params.get('ransac_line_tolerance', 5)
+                self._default_ransac_min_inliers_ratio = params.get('ransac_min_inliers_ratio', 0.7)
+                self._default_black_stone_thresh = params.get('black_stone_thresh', self._hardcoded_default_black_stone_thresh)
+                self._default_white_stone_thresh = params.get('white_stone_thresh', self._hardcoded_default_white_stone_thresh)
+                
                 write_log(f"參數從 '{PARAM_FILE_NAME}' 載入成功。")
         except FileNotFoundError:
             write_log(f"參數檔案 '{PARAM_FILE_NAME}' 未找到，使用硬編碼預設值。")
@@ -75,32 +92,39 @@ class VisionSystem:
             write_log(f"載入參數時發生意外錯誤: {e}，使用硬編碼預設值。")
             self._set_hardcoded_defaults()
         
-        if os.path.exists(EMPTY_BOARD_TEMPLATE_FILE):
-            self.empty_board_template = np.load(EMPTY_BOARD_TEMPLATE_FILE)
-            write_log(f"已載入保存的空棋盤模板 '{EMPTY_BOARD_TEMPLATE_FILE}'。")
-        else:
-            self.empty_board_template = None
-            write_log("未找到空棋盤模板，請在校準後創建。")
-
         if '_saved_grid_map' in self._loaded_params and self._loaded_params['_saved_grid_map']:
             self.grid_map = np.array(self._loaded_params['_saved_grid_map'])
             write_log("已載入保存的手動網格地圖。")
+            self.manual_mode = "manual_grid"
         else:
             self.manual_points = []
             self.grid_map = None
 
     def _set_hardcoded_defaults(self):
-        self._default_black_stone_diff = self._hardcoded_default_black_stone_diff
-        self._default_white_stone_diff = self._hardcoded_default_white_stone_diff
-        self._default_stability_frames = self._hardcoded_default_stability_frames
-
+        self._default_canny_threshold1 = self._hardcoded_default_canny_threshold1
+        self._default_canny_threshold2 = self._hardcoded_default_canny_threshold2
+        self._default_hough_threshold = self._hardcoded_default_hough_threshold
+        self._default_hough_min_line_length = self._hardcoded_default_hough_min_line_length
+        self._default_hough_max_line_gap = self._hardcoded_default_hough_max_line_gap
+        self._default_ransac_iterations = self._hardcoded_default_ransac_iterations
+        self._default_ransac_line_tolerance = self._hardcoded_default_ransac_line_tolerance
+        self._default_ransac_min_inliers_ratio = self._hardcoded_default_ransac_min_inliers_ratio
+        self._default_black_stone_thresh = self._hardcoded_default_black_stone_thresh
+        self._default_white_stone_thresh = self._hardcoded_default_white_stone_thresh
 
     def _save_parameters(self):
-        """將當前參數和網格地圖保存到檔案中。"""
+        """將當前參數保存到檔案中，並更新為新的預設值。"""
         params_to_save = {
-            'black_stone_diff': self.black_stone_diff,
-            'white_stone_diff': self.white_stone_diff,
-            'stability_frames': self.stability_frames,
+            'canny_threshold1': self.canny_threshold1,
+            'canny_threshold2': self.canny_threshold2,
+            'hough_threshold': self.hough_threshold,
+            'hough_min_line_length': self.hough_min_line_length,
+            'hough_max_line_gap': self.hough_max_line_gap,
+            'ransac_iterations': self.ransac_iterations,
+            'ransac_line_tolerance': self.ransac_line_tolerance,
+            'ransac_min_inliers_ratio': self.ransac_min_inliers_ratio,
+            'black_stone_thresh': self.black_stone_thresh,
+            'white_stone_thresh': self.white_stone_thresh,
             '_saved_grid_map': self.grid_map.tolist() if self.manual_mode == "manual_grid" and self.grid_map is not None else None,
         }
         try:
@@ -108,64 +132,47 @@ class VisionSystem:
                 json.dump(params_to_save, f, indent=4)
             write_log(f"參數成功保存到 '{PARAM_FILE_NAME}'。")
             
-            self._default_black_stone_diff = self.black_stone_diff
-            self._default_white_stone_diff = self.white_stone_diff
-            self._default_stability_frames = self.stability_frames
-
+            self._default_canny_threshold1 = self.canny_threshold1
+            self._default_canny_threshold2 = self.canny_threshold2
+            self._default_hough_threshold = self.hough_threshold
+            self._default_hough_min_line_length = self.hough_min_line_length
+            self._default_hough_max_line_gap = self.hough_max_line_gap
+            self._default_ransac_iterations = self.ransac_iterations
+            self._default_ransac_line_tolerance = self.ransac_line_tolerance
+            self._default_ransac_min_inliers_ratio = self.ransac_min_inliers_ratio
+            self._default_black_stone_thresh = self.black_stone_thresh
+            self._default_white_stone_thresh = self.white_stone_thresh
         except Exception as e:
             write_log(f"保存參數到 '{PARAM_FILE_NAME}' 時發生錯誤: {e}")
-
 
     def _create_parameter_trackbars(self):
         """創建用於調整影像處理參數的滑桿 UI。"""
         self.control_window_name = 'Vision Parameters'
         cv2.namedWindow(self.control_window_name)
+        control_window_img = np.zeros((100, 500, 3), dtype=np.uint8)
+        cv2.imshow(self.control_window_name, control_window_img)
 
-        # --- 棋子偵測參數 (基於差異的閾值) ---
-        cv2.createTrackbar('Black Diff', self.control_window_name, -self.black_stone_diff, 255, self._on_black_stone_diff_change)
-        cv2.createTrackbar('White Diff', self.control_window_name, self.white_stone_diff, 255, self._on_white_stone_diff_change)
-        
-        # --- 穩定性偵測參數 ---
-        cv2.createTrackbar('Stability Frames', self.control_window_name, self.stability_frames, 30, self._on_stability_frames_change)
-        
-        # --- 新增的「保存空棋盤」按鈕 ---
-        cv2.createTrackbar('--- Save Empty Board ---', self.control_window_name, 0, 1, self._on_save_empty_board_press)
-
-        # 清除手動選點按鈕
+        cv2.createTrackbar('Black Thresh', self.control_window_name, self.black_stone_thresh, 255, self._on_black_stone_thresh_change)
+        cv2.createTrackbar('White Thresh', self.control_window_name, self.white_stone_thresh, 255, self._on_white_stone_thresh_change)
         cv2.createTrackbar('Clear Points', self.control_window_name, 0, 1, self._on_clear_manual_points)
-
-        # 重置和保存按鈕
         cv2.createTrackbar('--- Reset All ---', self.control_window_name, 0, 1, self._on_reset_button_press)
         cv2.createTrackbar('--- Save Grid Map ---', self.control_window_name, 0, 1, self._on_save_button_press)
 
         write_log("視覺參數調整 UI 已創建。")
 
-    # --- 滑桿回調函數 (Callback Functions) ---
-    def _on_black_stone_diff_change(self, val):
-        self.black_stone_diff = -val
-    
-    def _on_white_stone_diff_change(self, val):
-        self.white_stone_diff = val
+    def _on_black_stone_thresh_change(self, val):
+        self.black_stone_thresh = val
+        write_log(f"黑子閾值更新為: {self.black_stone_thresh}")
 
-    def _on_stability_frames_change(self, val):
-        self.stability_frames = val if val > 0 else 1 # 穩定幀數至少為 1
-    
-    def _on_save_empty_board_press(self, val):
-        if val == 1:
-            write_log("正在保存空棋盤模板...")
-            ret, frame = self.cap.read()
-            if ret:
-                if self.grid_map is not None:
-                    # 我們將原始的彩色幀保存為模板，以便後續可以進行彩色或灰度處理
-                    np.save(EMPTY_BOARD_TEMPLATE_FILE, frame)
-                    self.empty_board_template = frame
-                    write_log(f"空棋盤模板 '{EMPTY_BOARD_TEMPLATE_FILE}' 已保存。")
-                else:
-                    write_log("錯誤: 請先完成網格校準，才能保存空棋盤模板！")
-            else:
-                write_log("錯誤: 無法從攝影機讀取影像來保存模板。")
-            cv2.setTrackbarPos('--- Save Empty Board ---', self.control_window_name, 0)
-    
+    def _on_white_stone_thresh_change(self, val):
+        self.white_stone_thresh = val
+        if self.white_stone_thresh <= self.black_stone_thresh:
+            self.white_stone_thresh = self.black_stone_thresh + 1
+            if self.white_stone_thresh > 255:
+                self.white_stone_thresh = 255
+            cv2.setTrackbarPos('White Thresh', self.control_window_name, self.white_stone_thresh)
+        write_log(f"白子閾值更新為: {self.white_stone_thresh}")
+
     def _on_clear_manual_points(self, val):
         if val == 1:
             write_log("清除所有手動選擇的點。")
@@ -201,8 +208,9 @@ class VisionSystem:
                             write_log("錯誤: 網格地圖創建失敗，請重試。")
                             self.manual_points = [] 
                             cv2.setTrackbarPos('Clear Points', self.control_window_name, 0)
-                            
+
     def _create_grid_map(self, points):
+        """從手動點選的 38 個點建立一個 19x19 的網格地圖。"""
         if len(points) != self.BOARD_DIM * 2:
             write_log("錯誤: 創建網格地圖所需的點數不為 38。")
             return None
@@ -236,7 +244,6 @@ class VisionSystem:
         
         cv2.namedWindow('Vision System - Live Feed')
         cv2.setMouseCallback('Vision System - Live Feed', self._mouse_callback)
-
         return True
 
     def get_board_state(self):
@@ -250,35 +257,26 @@ class VisionSystem:
 
         if self.grid_map is not None:
             self._draw_grid_map(processed_display_frame)
-            
-            if self.empty_board_template is not None:
-                write_log("網格地圖和模板已載入，正在進行棋子偵測...")
-                board_state = self._detect_stones(frame)
-                self._draw_stone_detections(processed_display_frame, board_state)
-            else:
-                write_log("請先在空棋盤上按下 '--- Save Empty Board ---' 按鈕來創建模板。")
+            write_log("網格地圖已載入，正在進行棋子偵測...")
+            board_state = self._detect_stones(frame)
+            self._draw_stone_detections(processed_display_frame, board_state)
+        elif len(self.manual_points) == self.BOARD_DIM * 2:
+            write_log("所有校準點已點選。請按 '--- Save Grid Map ---' 按鈕保存網格地圖。")
+            self._draw_manual_points(processed_display_frame)
         else:
-            if len(self.manual_points) == self.BOARD_DIM * 2:
-                write_log("所有校準點已點選。請按 '--- Save Grid Map ---' 按鈕保存網格地圖。")
-                self._draw_manual_points(processed_display_frame)
-            else:
-                write_log(f"請依序點擊 {len(self.manual_points)}/{self.BOARD_DIM*2} 個網格點以進行校準。")
-                self._draw_manual_points(processed_display_frame)
+            write_log(f"請依序點擊 {len(self.manual_points)}/{self.BOARD_DIM*2} 個網格點以進行校準。")
+            self._draw_manual_points(processed_display_frame)
 
         cv2.imshow('Vision System - Live Feed', processed_display_frame)
+        control_window_img = np.zeros((100, 500, 3), dtype=np.uint8)
+        cv2.imshow(self.control_window_name, control_window_img)
+        
         return board_state
 
     def _detect_stones(self, frame):
-        """
-        在已校準的網格上偵測黑子和白子，使用背景相減法。
-        """
+        """在已校準的網格上偵測黑子和白子。"""
         board_state = {}
-        if self.empty_board_template is None:
-            write_log("錯誤: 未載入空棋盤模板，無法進行棋子偵測。")
-            return {}
-        
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray_template = cv2.cvtColor(self.empty_board_template, cv2.COLOR_BGR2GRAY)
         
         for row in range(self.BOARD_DIM):
             for col in range(self.BOARD_DIM):
@@ -289,36 +287,28 @@ class VisionSystem:
                 roi_y_min = max(0, y - self.stone_detection_roi_radius)
                 roi_y_max = min(gray_frame.shape[0], y + self.stone_detection_roi_radius)
                 
-                roi_frame = gray_frame[roi_y_min:roi_y_max, roi_x_min:roi_x_max]
-                roi_template = gray_template[roi_y_min:roi_y_max, roi_x_min:roi_x_max]
-
-                if roi_frame.size == 0 or roi_template.size == 0:
+                roi = gray_frame[roi_y_min:roi_y_max, roi_x_min:roi_x_max]
+                if roi.size == 0:
                     continue
 
-                difference = np.mean(roi_frame) - np.mean(roi_template)
-
-                if difference < self.black_stone_diff:
+                average_brightness = np.mean(roi)
+                if average_brightness < self.black_stone_thresh:
                     col_char = "ABCDEFGHJKLMNOPQRST"[col]
                     row_num = row + 1
                     board_state[f"{col_char}{row_num}"] = "B"
-                elif difference > self.white_stone_diff:
+                elif average_brightness > self.white_stone_thresh:
                     col_char = "ABCDEFGHJKLMNOPQRST"[col]
                     row_num = row + 1
                     board_state[f"{col_char}{row_num}"] = "W"
         
+        write_log(f"棋子偵測結果：偵測到 {len(board_state)} 個棋子。")
         return board_state
 
     def _draw_stone_detections(self, frame_to_draw, board_state):
+        """在影像上繪製棋子偵測的結果，並用顏色標記"""
         for gtp_coord, stone_color in board_state.items():
-            row_char = gtp_coord[0]
-            row_num_str = gtp_coord[1:]
-
-            if row_char not in "ABCDEFGHJKLMNOPQRST": continue
-            if not row_num_str.isdigit(): continue
-
-            row = int(row_num_str) - 1
-            col = "ABCDEFGHJKLMNOPQRST".index(row_char)
-
+            row = int(gtp_coord[1:]) - 1
+            col = "ABCDEFGHJKLMNOPQRST".index(gtp_coord[0])
             p = tuple(self.grid_map[row, col])
             
             color_to_draw = (0, 0, 0) if stone_color == "B" else (255, 255, 255)
@@ -335,7 +325,7 @@ class VisionSystem:
             self.cap.release()
         cv2.destroyAllWindows() 
         write_log("視覺系統攝影機已停止。")
-        
+
     def _draw_manual_points(self, frame_to_draw):
         for i, p in enumerate(self.manual_points):
             color = self.manual_point_colors[i % 2]
@@ -360,28 +350,16 @@ class VisionSystem:
                         p2 = tuple(self.grid_map[row, col + 1])
                         cv2.line(frame_to_draw, p, p2, (0, 255, 0), 1)
 
-    def _create_grid_map(self, points):
-        if len(points) != self.BOARD_DIM * 2:
-            write_log("錯誤: 創建網格地圖所需的點數不為 38。")
-            return None
-        
-        x_points = np.array(points[0:self.BOARD_DIM])
-        y_points = np.array(points[self.BOARD_DIM:])
-        
-        if len(x_points) != self.BOARD_DIM or len(y_points) != self.BOARD_DIM:
-            write_log("錯誤: 創建網格地圖時，X或Y軸點數不足19。")
-            return None
-        grid = np.zeros((self.BOARD_DIM, self.BOARD_DIM, 2), dtype=np.int32)
-        x_coords_of_x_points = x_points[:,0]
-        y_coords_of_y_points = y_points[:,1]
-        x_coords = np.interp(np.arange(self.BOARD_DIM), np.arange(self.BOARD_DIM), x_coords_of_x_points)
-        y_coords = np.interp(np.arange(self.BOARD_DIM), np.arange(self.BOARD_DIM), y_coords_of_y_points)
-        for row in range(self.BOARD_DIM):
-            for col in range(self.BOARD_DIM):
-                grid[row, col] = (int(x_coords[col]), int(y_coords[row]))
-        write_log("已成功創建 19x19 網格地圖。")
-        return grid
-        
+    def _sort_manual_corners(self, corners):
+        corners = np.array(corners, dtype="float32")
+        s = corners.sum(axis=1)
+        top_left = corners[np.argmin(s)]
+        bottom_right = corners[np.argmax(s)]
+        diff = np.diff(corners, axis=1)
+        top_right = corners[np.argmin(diff)] 
+        bottom_left = corners[np.argmax(diff)] 
+        return np.array([top_left, top_right, bottom_right, bottom_left], dtype="float32")
+
 if __name__ == "__main__":
     vision_system = None
     try:
@@ -390,15 +368,11 @@ if __name__ == "__main__":
             write_log("視覺系統啟動失敗，無法進行單獨測試。")
             exit(1)
         write_log("\n✅ VisionSystem 單獨測試模式已啟動。")
-        
-        if vision_system.grid_map is None:
-            write_log("---")
-            write_log("未找到已保存的網格地圖。請點擊 'Live Feed' 視窗開始手動校準。")
-            write_log("點擊順序：從左下角開始，沿著最底層水平線點擊19個點，然後再沿著最左側垂直線點擊19個點。")
-            write_log("---")
+        write_log("請將圍棋盤置於攝影機下方。按 'q' 鍵退出所有視窗。")
 
         while True:
             board_state = vision_system.get_board_state()
+            write_log(f"當前黑子閾值: {vision_system.black_stone_thresh}, 白子閾值: {vision_system.white_stone_thresh}")
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 write_log("用戶手動退出 VisionSystem 單獨測試。")
